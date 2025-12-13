@@ -166,6 +166,36 @@ class WCAVoteCrawler:
             print(f"Error crawling votes: {e}")
             return None
 
+    def get_latest_votes(self, award_id=None, nominee_filter=None):
+        cursor = self.db_conn.cursor()
+        
+        query = "SELECT award_id, nominee_id, vote_count FROM votes_latest"
+        params = []
+        
+        conditions = []
+        if award_id:
+            conditions.append("award_id = ?")
+            params.append(award_id)
+        
+        if nominee_filter:
+            filter_conditions = []
+            for award_id_val, nominee_id_val in nominee_filter:
+                filter_conditions.append("(award_id = ? AND nominee_id = ?)")
+                params.extend([award_id_val, nominee_id_val])
+            conditions.append("(" + " OR ".join(filter_conditions) + ")")
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        cursor.execute(query, params)
+        
+        votes = {}
+        for row in cursor.fetchall():
+            key = f"{row['award_id']}-{row['nominee_id']}"
+            votes[key] = int(row['vote_count'])
+        
+        return votes
+
     def get_vote_history(self, award_id, limit=5, start_at=None):
         award_data = None
         award_name = None
