@@ -166,38 +166,95 @@ class WCAVoteCrawler:
             print(f"Error crawling votes: {e}")
             return None
 
-    def get_vote_history(self, award_id=None, data_member=None, start_at=None):
+    def get_vote_history(self, award_id, limit=5, start_at=None):
+        award_data = None
+        award_name = None
+        
+        for category_data in self.wca_nominees.values():
+            awards_source = category_data.get('subcategories', category_data)
+            if award_id in awards_source:
+                award_data = awards_source[award_id]
+                award_name = award_data.get('award_name', '')
+                break
+        
+        if not award_data or 'nominees' not in award_data:
+            return {"nominees": [], "award_name": award_name or ""}
+        
+        nominees_list = award_data.get('nominees', [])
+        
         cursor = self.db_conn.cursor()
-        query = """
-            SELECT
-                vh.award_id,
-                vh.nominee_id,
-                vh.vote_count,
-                vh.fetched_at
-            FROM votes_history vh
-            WHERE 1=1
+        history_query = """
+            SELECT nominee_id, vote_count, fetched_at
+            FROM votes_history
+            WHERE award_id = ?
         """
-        params = []
-        if award_id:
-            query += " AND vh.award_id = ?"
-            params.append(award_id)
-        if data_member:
-            query += " AND vh.nominee_id = ?"
-            params.append(data_member)
+        history_params = [award_id]
+        
         if start_at:
-            query += " AND vh.fetched_at >= ?"
-            params.append(start_at)
-        query += " ORDER BY vh.fetched_at ASC"
-
-        cursor.execute(query, params)
-        vote_history = []
+            try:
+                dt = datetime.fromisoformat(start_at.replace(" ", "T"))
+                start_at_norm = dt.replace(microsecond=0).isoformat()
+            except Exception:
+                start_at_norm = start_at
+            history_query += " AND fetched_at >= ?"
+            history_params.append(start_at_norm)
+        
+        history_query += " ORDER BY nominee_id, fetched_at ASC"
+        
+        cursor.execute(history_query, history_params)
+        
+        vote_history_by_nominee = {}
+        vote_counts = {}
+        
         for row in cursor.fetchall():
-            vote_history.append({
-                "vote_count": row["vote_count"],
-                "fetched_at": row["fetched_at"]
+            nominee_id = row["nominee_id"]
+            vote_count = row["vote_count"]
+            timestamp = datetime.fromisoformat(row["fetched_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            
+            if nominee_id not in vote_history_by_nominee:
+                vote_history_by_nominee[nominee_id] = []
+            
+            vote_history_by_nominee[nominee_id].append({
+                "vote_count": vote_count,
+                "timestamp": timestamp
             })
-
-        return {"vote_history": vote_history}
+            
+            vote_counts[nominee_id] = {
+                "vote_count": vote_count,
+                "timestamp": timestamp
+            }
+        
+        nominees_with_votes = []
+        
+        for nominee in nominees_list:
+            nominee_id = nominee.get('data_member', '')
+            if not nominee_id:
+                continue
+            
+            current_vote = vote_counts.get(nominee_id, {"vote_count": "0", "fetched_at": None})
+            
+            vote_history = vote_history_by_nominee.get(nominee_id, [])
+            
+            nominees_with_votes.append({
+                **nominee,
+                "current_vote_count": current_vote["vote_count"],
+                "last_update_time": current_vote["timestamp"],
+                "vote_history": vote_history
+            })
+        
+        nominees_with_votes.sort(
+            key=lambda x: int(x.get("current_vote_count", "0")), 
+            reverse=True
+        )
+        
+        if limit and limit > 0:
+            nominees_with_votes = nominees_with_votes[:limit]
+        
+        return {
+            "award_id": award_id,
+            "award_name": award_name or "",
+            "nominees": nominees_with_votes
+        }
 
     def run(self):
         while True:

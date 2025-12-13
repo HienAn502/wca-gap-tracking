@@ -23,14 +23,15 @@ class WCAVotesAPI:
         try:
             last_updated = request.args.get('last_updated')
             award_id = request.args.get('award_id')
-            data_member = request.args.get('data_member')
+            limit = int(request.args.get('limit', '5'))
+            
             return jsonify(self.wca_vote_crawler.get_vote_history(
                 award_id=award_id,
-                data_member=data_member,
+                limit=limit,
                 start_at=last_updated
             )), 200
         except Exception as e:
-            return jsonify({"error": "An unexpected error occurred"}), 500
+            return jsonify({"error": "An unexpected error occurred", "details": str(e)}), 500
 
     def api_get_categories(self):
         try:
@@ -39,7 +40,7 @@ class WCAVotesAPI:
             return jsonify({"error": "Failed to load categories"}), 500
 
     def run(self, debug=True):
-        self.app.run(port=3000)
+        self.app.run(port=5000)
 
 if __name__ == '__main__':
     wca_votes = WCAVotesAPI()
