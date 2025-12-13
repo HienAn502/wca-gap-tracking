@@ -1,129 +1,235 @@
-import urllib.request
+import requests
 import json
 from datetime import datetime
 import wca_nominee_crawler
-from pytz import timezone
-import os
+import sqlite3
+import time
 
-class CrawlVotes:
-    def __init__(self):
-        self.list_awards = []
-        self.wca_data = {}
+try:
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+except ImportError:
+    from pytz import timezone
+    TZ = timezone("Asia/Ho_Chi_Minh")
+
+class WCAVoteCrawler:
+    def __init__(self, db_path='wca_votes.db'):
+        self.db_path = db_path
+        self.db_conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.db_conn.row_factory = sqlite3.Row
+        self._init_db()
         self.load_wca_nominees()
-        self.load_vote_histories()
+
+        self.session = requests.Session()
+
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
+        })
+
+        self.cookies = {
+            "_ga": "GA1.1.2092674413.1765607346",
+            "__uidac": "01693d07b321f1b6c44934461739a8c7",
+            "__admUTMtime": "1765607347",
+            "ASP.NET_SessionId": "2szo5xvygro0ca1ycjgojtmq",
+            "__iid": "",
+            "__su": "0",
+            "_ga_DY6444DRRC": "GS2.1.s1765612894$o2$g0$t1765612894$j60$l0$h0"
+        }
+
+        self.headers = {
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Origin": "https://weyoung.vn",
+            "Referer": "https://weyoung.vn/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "sec-ch-ua": '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"'
+        }
+
+    def _init_db(self):
+        cursor = self.db_conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS votes_latest (
+                award_id TEXT NOT NULL,
+                nominee_id TEXT NOT NULL,
+                vote_count TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (award_id, nominee_id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS votes_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                award_id TEXT NOT NULL,
+                nominee_id TEXT NOT NULL,
+                vote_count TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_votes_latest_award 
+            ON votes_latest(award_id)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_votes_history_award 
+            ON votes_history(award_id)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_votes_history_award_nominee 
+            ON votes_history(award_id, nominee_id)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_votes_history_fetched 
+            ON votes_history(fetched_at)
+        ''')
+        
+        self.db_conn.commit()
 
     def load_wca_nominees(self):
         try:
             with open('wca_nominees.json', 'r', encoding='utf-8') as f:
-                self.wca_data = json.load(f)
+                self.wca_nominees = json.load(f)
         except FileNotFoundError:
-            self.wca_data = wca_nominee_crawler.CrawlNominees().crawl_nominees()
-
-    def load_vote_histories(self):
-        for award_id in self.wca_data:
-            self.list_awards.append(award_id)
-
-        for award_id in self.list_awards:
-            try:
-                with open(os.path.join('vote_histories', f'{award_id}.json'), 'r', encoding='utf-8') as f:
-                    vote_histories = json.load(f)
-            except FileNotFoundError:
-                vote_histories = {}
-
-            for nominee_id in self.wca_data[award_id]['nominees']:
-                if nominee_id in vote_histories['nominees']:
-                    self.wca_data[award_id]['nominees'][nominee_id]['vote_history'] = vote_histories['nominees'][nominee_id]['vote_history']
+            self.wca_nominees = wca_nominee_crawler.CrawlNominees().crawl_nominees()
         
-    def crawl_votes(self, list_awards=[]):
-        vietnam_tz = timezone('Asia/Ho_Chi_Minh')
-        current_time = datetime.now(vietnam_tz).strftime("%Y-%m-%d %H:%M:%S")
-
-        if not list_awards:
-            list_awards = self.list_awards
-
-        lst_ids = [f"w{award_id}-{nominee_id}" for award_id in list_awards for nominee_id in self.wca_data[award_id]['nominees']]
+        self.lst_ids = []
         
-        api_url = f"https://api2024.wechoice.vn/vote-token.htm?m=get-vote&lstId={''.join(lst_ids)}"
-        headers = {
-            "accept": "*/*",
-            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
-            "sec-ch-ua": '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"macOS"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-site",
-            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
-            "referer": "https://wechoice.vn/"
-        }
-        request = urllib.request.Request(api_url, headers=headers)
-        with urllib.request.urlopen(request) as response:
-            vote_data = json.loads(response.read().decode('utf-8'))
+        for category_data in self.wca_nominees.values():
+            awards_source = category_data.get('subcategories', category_data)
+            for award_id, award_data in awards_source.items():
+                if isinstance(award_data, dict) and 'nominees' in award_data:
+                    for nominee in award_data.get('nominees', []):
+                        nominee_id = nominee.get('data_member')
+                        if nominee_id:
+                            self.lst_ids.append(f"w{award_id}-{nominee_id}")
 
-        if 'Success' not in vote_data or vote_data['Success'] != True:
-            return
-        
-        result = {}
-        
-        for item in vote_data.get('Data', []):
-            award_id = str(item['a'])
-            nominee_id = str(item['m'])
-            vote_count = str(item['list'][0]['v']) if item.get('list') else '0'
+    def _save_votes(self, votes_data):
+        cursor = self.db_conn.cursor()
+        now = datetime.now(TZ).isoformat()
 
-            if 'vote_history' not in self.wca_data[award_id]['nominees'][nominee_id]:
-                self.wca_data[award_id]['nominees'][nominee_id]['vote_history'] = []
+        rows_latest = []
+        rows_history = []
+        
+        for award_id, nominees_data in votes_data.items():
+            for nominee_id, vote_info in nominees_data.items():
+                vote_count = vote_info.get('count', '0')
+                rows_latest.append((award_id, nominee_id, vote_count, now))
+                rows_history.append((award_id, nominee_id, vote_count, now))
+
+        cursor.executemany("""
+            INSERT INTO votes_latest (
+                award_id, nominee_id, vote_count, fetched_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(award_id, nominee_id) DO UPDATE SET
+                vote_count = excluded.vote_count,
+                fetched_at = excluded.fetched_at
+        """, rows_latest)
+
+        cursor.executemany("""
+            INSERT INTO votes_history (
+                award_id, nominee_id, vote_count, fetched_at
+            ) VALUES (?, ?, ?, ?)
+        """, rows_history)
+        
+        print(f"Saved votes for {len(rows_latest)} nominees at {now}")
+        self.db_conn.commit()
+
+    def crawl_votes(self):        
+        api_url = f"https://api.weyoung.vn/vote-token.htm?m=get-vote&lstId={''.join(self.lst_ids)}"
+
+        try:
+            response = self.session.get(api_url, headers=self.headers, cookies=self.cookies)
+            vote_data = response.json()
+
+            if 'Success' not in vote_data or vote_data['Success'] != True:
+                return None
             
-            self.wca_data[award_id]['nominees'][nominee_id]['vote_history'].append({
-                'timestamp': current_time,
-                'count': vote_count
-            })
+            votes_data = {}
+            
+            for item in vote_data.get('Data', []):
+                award_id = str(item['a'])
+                nominee_id = str(item['m'])
+                vote_count = str(item['list'][0]['v']) if item.get('list') else '0'
 
-            if not result.get(award_id):
-                result[award_id] = {
-                    'nominees': {}
+                if award_id not in votes_data:
+                    votes_data[award_id] = {}
+                
+                votes_data[award_id][nominee_id] = {
+                    'count': vote_count
                 }
 
-            result[award_id]['nominees'][nominee_id] = {
-                'lastest_vote': {
-                    'timestamp': current_time,
-                    'count': vote_count
-                }  
-            }
-
-        return result
-
-    def crawl(self, list_awards=[]):
-        try:
-            self.crawl_votes(list_awards)
-        except Exception as e:
-            print(f"Error during crawl: {e}")
-
-    def save(self, list_awards=[]):
-        try:
-            if not os.path.exists('vote_histories'):
-                os.mkdir('vote_histories')
-
-            if not list_awards:
-                list_awards = self.list_awards
+            if votes_data:
+                self._save_votes(votes_data)
             
-            for award_id in list_awards:
-                vote_histories_award = {'nominees': {}}
-                
-                for member_id in self.wca_data[award_id]['nominees']:  
-                    if 'vote_history' in self.wca_data[award_id]['nominees'][member_id]:
-                        vote_histories_award['nominees'][member_id] = {
-                            'vote_history': self.wca_data[award_id]['nominees'][member_id]['vote_history']
-                        }
-                
-                with open(os.path.join('vote_histories', f'{award_id}.json'), 'w', encoding='utf-8') as f:
-                    json.dump(vote_histories_award, f, ensure_ascii=False, indent=4)
+            return votes_data
         except Exception as e:
-            print(f"Error saving data: {e}")
+            print(f"Error crawling votes: {e}")
+            return None
+
+    def get_vote_history(self, award_id=None, data_member=None, start_at=None):
+        cursor = self.db_conn.cursor()
+        query = """
+            SELECT
+                vh.award_id,
+                vh.nominee_id,
+                vh.vote_count,
+                vh.fetched_at
+            FROM votes_history vh
+            WHERE 1=1
+        """
+        params = []
+        if award_id:
+            query += " AND vh.award_id = ?"
+            params.append(award_id)
+        if data_member:
+            query += " AND vh.nominee_id = ?"
+            params.append(data_member)
+        if start_at:
+            query += " AND vh.fetched_at >= ?"
+            params.append(start_at)
+        query += " ORDER BY vh.fetched_at ASC"
+
+        cursor.execute(query, params)
+        vote_history = []
+        for row in cursor.fetchall():
+            vote_history.append({
+                "vote_count": row["vote_count"],
+                "fetched_at": row["fetched_at"]
+            })
+
+        return {"vote_history": vote_history}
 
     def run(self):
-        self.crawl()
-        self.save()
+        while True:
+            now = datetime.now(TZ)
+            if now.second % 10 == 0:
+                try:
+                    self.crawl_votes()
+                except Exception as e:
+                    print(f"Error crawling votes: {e}")
+            time.sleep(1)
+
+    def close(self):
+        try:
+            self.db_conn.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
-    crawler = CrawlVotes()
-    crawler.run()
+    crawler = WCAVoteCrawler()
+    try:
+        crawler.run()
+    except KeyboardInterrupt:
+        print("Stopping crawler...")
+    finally:
+        crawler.close()

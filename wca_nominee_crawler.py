@@ -1,24 +1,14 @@
-import urllib.request
-import json
+import requests
 import re
-import gzip
 
 class CrawlNominees:
     def __init__(self):
-        self.urls = [
-            'https://wechoice.vn/nhan-vat-truyen-cam-hung.htm',
-            'https://wechoice.vn/bff-best-fandom-forever-1955/bff-best-fandom-forever-18.htm',
-            'https://wechoice.vn/hang-muc-chinh/du-an-vi-viet-nam-toi-1951.htm',
-            'https://wechoice.vn/hang-muc-chinh/don-vi-vung-manh-viet-nam-1952.htm',
-            'https://wechoice.vn/hang-muc-chinh/giai-tri-38.htm',
-            'https://wechoice.vn/hang-muc-chinh/genz-area-45.htm',
-            'https://wechoice.vn/hang-muc-chinh/weyoung-1953.htm'
-        ]
+        pass
 
-    def get_content_between(self, text, start, end):
+    def get_content_between(self, text, start, end, group=1):
         pattern = f'{start}(.*?){end}'
         match = re.search(pattern, text, re.DOTALL)
-        return match.group(1) if match else ''
+        return match.group(group) if match else ''
     
     def parse_blocks(self, content, start_pattern, tag_type):
         blocks = []
@@ -27,7 +17,7 @@ class CrawlNominees:
         tag_count = 0
 
         for line in content.splitlines():
-            if start_pattern in line:
+            if not in_block and start_pattern in line:
                 in_block = True
                 tag_count = 1
                 current_block = line
@@ -44,78 +34,109 @@ class CrawlNominees:
 
         return blocks
 
-    def get_award_blocks(self, html_content):
+    def get_wy_category_blocks(self, html_content):
         return self.parse_blocks(
             html_content,
-            '<div class="main-voting-category category-top10" id="block-award',
+            'wy-category',
             'div'
         )
     
-    def get_nominees(self, award_block):
+    def get_subcate_blocks(self, category_block):
         return self.parse_blocks(
-            award_block,
-            '<li class="nominee-li js-vote-wrapt"',
-            'li'
+            category_block,
+            'subCate',
+            'div'
         )
+    
+    def get_list_nominees(self, container_block):
+        return self.parse_blocks(
+            container_block,
+            'listNominees',
+            'ul'
+        )
+
+    def extract_nominee_data(self, nominee_block):
+        nominee_data = {
+            'data_member': self.get_content_between(nominee_block, 'data-member="', '"'),
+            'ava_link': self.get_content_between(nominee_block, '<img src="', '"'),
+            'nominee_name': self.get_content_between(self.get_content_between(nominee_block, '<h3 class="nominee-name">', '</h3>'), ">", "<").strip(),
+            'nominee_des': self.get_content_between(nominee_block, '<div class="nominee-title">', '</div>'),
+        }
+
+        return nominee_data
+    
+    def get_nominees(self, award_block):
+        list_nominees = self.get_list_nominees(award_block)
+
+        if not list_nominees:
+            return []
+
+        nominees = []
+
+        for list_nominee_block in list_nominees:
+            for line in list_nominee_block.splitlines():
+                if '<li' in line and 'nominee js-vote-wrapt' in line.lower():
+                    li_blocks = self.parse_blocks(list_nominee_block, line.strip(), 'li')
+                    for li_block in li_blocks:
+                        nominees.append(self.extract_nominee_data(li_block))
+
+        return nominees
 
     def crawl_nominees(self):
         wca_nominees = {}
 
-        for url in self.urls:
-            print(f"Crawling nominees from {url}")
-            req = urllib.request.Request(url, headers={'Accept-Encoding': 'gzip'})
-            with urllib.request.urlopen(req) as response:
-                if response.info().get('Content-Encoding') == 'gzip':
-                    html = gzip.decompress(response.read()).decode('utf-8')
-                else:
-                    html = response.read().decode('utf-8')
+        url = "https://weyoung.vn/"
 
-            award_blocks = self.get_award_blocks(html)
-            for award_block in award_blocks:
-                award_id = self.get_content_between(award_block, '<div class="main-voting-category category-top10" id="block-award-', '"')
-                award_name = self.get_content_between(award_block, '<h3 class="category-name">', '</h3>').strip()
-                nominees = self.get_nominees(award_block)
-                
-                wca_nominees[award_id] = {
-                    'award_name': award_name,
-                    'nominees': {}
+        print(f"Crawling nominees from {url}")
+        response = requests.get(url, headers={'Accept-Encoding': 'gzip'})
+        html = response.text
+        print(f"Response status code: {response.status_code}")
+
+        category_blocks = self.get_wy_category_blocks(html)
+
+        print(f"Found {len(category_blocks)} wy-category blocks")
+        
+        for category_block in category_blocks:
+            category_tag = self.get_content_between(category_block, '<div class="wy-category ', '"')
+            
+            subcate_blocks = self.get_subcate_blocks(category_block)
+
+            if subcate_blocks:
+                print(f"Category '{category_tag}' has {len(subcate_blocks)} subcategories")
+                wca_nominees[category_tag] = {
+                    "subcategories": {}
                 }
-                
-                for nominee in nominees:
-                    data_member = re.search(r'data-member="(\d+)"', nominee).group(1)
-                    ava_link = re.search(r'<img src="([^"]+)"', nominee).group(1)
-                    nominee_name = self.get_content_between(nominee, '<h3 class="nominee-name">', '</h3>').strip()
-                    nominee_vote_url = 'https://wechoice.vn' + self.get_content_between(nominee_name, '<a href="', '"').strip()
-                    nominee_name = re.sub(r'<[^>]+>', '', nominee_name).strip()
-                    nominee_des = self.get_content_between(nominee, '<div class="nominee-des">', '</div>').strip()
-                    
-                    wca_nominees[award_id]['nominees'][data_member] = {
-                        'ava_link': ava_link,
-                        'nominee_name': nominee_name,
-                        'nominee_vote_url': nominee_vote_url,
-                        'nominee_des': nominee_des,
-                        'vote_history': []
+
+                for subcate_block in subcate_blocks:
+                    award_name = self.get_content_between(subcate_block, '<h2 id="award-name-(.*?)">', '</h2>', 2)
+                    award_id = self.get_content_between(subcate_block, '<h2 id="award-name-', '"')
+                    print(f"Award '{award_name}' has id '{award_id}' in category '{category_tag}'")
+
+                    nominees = self.get_nominees(subcate_block)
+                    print(f"Found {len(nominees)} nominees in award '{award_name}'")
+
+                    wca_nominees[category_tag]['subcategories'][award_id] = {
+                        "award_name": award_name,
+                        "nominees": nominees
                     }
+            else:
+                award_name = self.get_content_between(category_block, '<div id="award-name-(.*?)">', '</div>', 2)
+                award_id = self.get_content_between(category_block, '<div id="award-name-', '"')
+
+                print(f"Award '{award_name}' has id '{award_id}' in category '{category_tag}'")
+
+                nominees = self.get_nominees(category_block)
+                print(f"Found {len(nominees)} nominees in category '{category_tag}'")
+
+                wca_nominees[category_tag] = {
+                    award_id: {
+                        "award_name": award_name,
+                        "nominees": nominees
+                    }
+                }
 
         return wca_nominees
 
-    def crawl(self):
-        try:
-            self.wca_nominees = self.crawl_nominees()
-        except Exception as e:
-            print(f"Error during crawl: {e}")
-
-    def save(self):
-        try:
-            with open('wca_nominees.json', 'w', encoding='utf-8') as f:
-                json.dump(self.wca_nominees, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Error saving data: {e}")
-
-    def run(self):
-        self.crawl()
-        self.save()
-
 if __name__ == "__main__":
     crawler = CrawlNominees()
-    crawler.run()
+    wca_nominees = crawler.crawl_nominees()
