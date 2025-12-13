@@ -26,16 +26,6 @@ class WCAVoteCrawler:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
         })
 
-        self.cookies = {
-            "_ga": "GA1.1.2092674413.1765607346",
-            "__uidac": "01693d07b321f1b6c44934461739a8c7",
-            "__admUTMtime": "1765607347",
-            "ASP.NET_SessionId": "2szo5xvygro0ca1ycjgojtmq",
-            "__iid": "",
-            "__su": "0",
-            "_ga_DY6444DRRC": "GS2.1.s1765612894$o2$g0$t1765612894$j60$l0$h0"
-        }
-
         self.headers = {
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -148,7 +138,7 @@ class WCAVoteCrawler:
         api_url = f"https://api.weyoung.vn/vote-token.htm?m=get-vote&lstId={''.join(self.lst_ids)}"
 
         try:
-            response = self.session.get(api_url, headers=self.headers, cookies=self.cookies)
+            response = self.session.get(api_url, headers=self.headers)
             vote_data = response.json()
 
             if 'Success' not in vote_data or vote_data['Success'] != True:
