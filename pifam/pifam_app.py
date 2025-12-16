@@ -361,6 +361,72 @@ if previous is not None:
 st.divider()
 
 # ----------------------------------
+# GAP TREND CHART
+# ----------------------------------
+st.subheader("📈 Xu hướng khoảng cách theo thời gian")
+
+if not gap_df.empty:
+    chart_df = gap_df.copy()
+    chart_df["Time"] = pd.to_datetime(
+        chart_df["fetched_at"],
+        errors="coerce"
+    )
+
+    min_y = chart_df[["gap_above", "gap_below"]].min().min()
+    max_y = chart_df[["gap_above", "gap_below"]].max().max()
+
+    chart = (
+        alt.Chart(chart_df)
+        .transform_fold(
+            ["gap_above", "gap_below"],
+            as_=["type", "value"]
+        )
+        .mark_line(strokeWidth=3)
+        .encode(
+            x=alt.X("Time:T", title="Thời gian"),
+            y=alt.Y(
+                "value:Q",
+                scale=alt.Scale(domain=[min_y * 0.98, max_y * 1.02]),
+                title="Khoảng cách (votes)"
+            ),
+            color=alt.Color(
+                "type:N",
+                scale=alt.Scale(
+                    domain=["gap_above", "gap_below"],
+                    range=["#7aa4fa", "#98c501"]
+                ),
+                legend=alt.Legend(
+                    title="Loại khoảng cách",
+                    labelExpr="""
+                        datum.label == 'gap_above' ? 'Khoảng cách lên hạng trên'
+                        : 'Khoảng cách với hạng dưới'
+                    """
+                )
+            ),
+            strokeDash=alt.StrokeDash(
+                "type:N",
+                scale=alt.Scale(
+                    domain=["gap_above", "gap_below"],
+                    range=[[6, 4], [1, 0]]
+                )
+            ),
+            tooltip=[
+                alt.Tooltip("Time:T", title="Thời gian"),
+                alt.Tooltip("type:N", title="Loại"),
+                alt.Tooltip("value:Q", title="Khoảng cách", format=",")
+            ]
+        )
+        .properties(height=350)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+else:
+    st.info("Đang chờ dữ liệu lịch sử để tạo biểu đồ…")
+
+st.divider()
+
+# ----------------------------------
 # GAP HISTORY TABLE
 # ----------------------------------
 st.subheader("📋 Lịch sử khoảng cách (Cập nhật mỗi 10 phút)")
@@ -393,46 +459,8 @@ else:
 
 st.divider()
 
-# ----------------------------------
-# GAP TREND CHART
-# ----------------------------------
-st.subheader("📈 Xu hướng khoảng cách theo thời gian")
-
+# Additional stats
 if not gap_df.empty:
-    chart_df = gap_df.copy()
-    chart_df["Time"] = pd.to_datetime(
-        chart_df["fetched_at"],
-        format="ISO8601",
-        errors="coerce"
-    )
-
-    min_y = chart_df[["gap_above", "gap_below"]].min().min()
-    max_y = chart_df[["gap_above", "gap_below"]].max().max()
-
-    chart = (
-        alt.Chart(chart_df)
-        .transform_fold(
-            ["gap_above", "gap_below"],
-            as_=["type", "value"]
-        )
-        .mark_line()
-        .encode(
-            x="Time:T",
-            y=alt.Y(
-                "value:Q",
-                scale=alt.Scale(domain=[min_y * 0.98, max_y * 1.02]),
-                title="Gap"
-            ),
-            color="type:N"
-        )
-        .properties(height=350)
-    )
-
-    st.altair_chart(chart, use_container_width=True)
-
-    st.divider()
-
-    # Additional stats
     st.subheader("📊 Thống kê lịch sử")
     col1, col2 = st.columns(2)
 
@@ -447,10 +475,9 @@ if not gap_df.empty:
             "Khoảng cách nhỏ nhất tới vị trí dẫn đầu",
             f"{int(gap_df['gap_to_top'].min()):,}"
         )
-else:
-    st.info("Đang chờ dữ liệu lịch sử để tạo biểu đồ…")
 
 st.divider()
+
 # ----------------------------------
 # EXPLANATION
 # ----------------------------------
