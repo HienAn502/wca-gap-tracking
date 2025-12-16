@@ -25,6 +25,9 @@ class PiFamGapTracker:
         self.db_conn.row_factory = sqlite3.Row
         self._init_db()
 
+        # Track last history save time
+        self.last_history_save = None
+
         # Initialize session for API calls
         self.session = requests.Session()
         self.session.headers.update({
@@ -95,7 +98,7 @@ class PiFamGapTracker:
                            )
                        """)
 
-        # History table - saves every fetch
+        # History table - saves every 10 minutes
         cursor.execute("""
                        CREATE TABLE IF NOT EXISTS pifam_gap_history
                        (
@@ -200,6 +203,16 @@ class PiFamGapTracker:
             print(f"Error fetching votes from API: {e}")
             return None
 
+    def should_save_history(self):
+        """Check if 10 minutes have passed since last history save"""
+        now = datetime.now(TZ)
+
+        if self.last_history_save is None:
+            return True
+
+        time_diff = (now - self.last_history_save).total_seconds()
+        return time_diff >= 600  # 600 seconds = 10 minutes
+
     def calculate_and_save_gap(self):
         # Fetch votes from API instead of database
         votes_data = self.fetch_votes_from_api()
@@ -238,11 +251,11 @@ class PiFamGapTracker:
         nominee_top_id, top_votes = ranking[0]
         gap_to_top = top_votes - current_votes
 
-        now = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now(TZ).isoformat(timespec="seconds")
 
         cursor = self.db_conn.cursor()
 
-        # Update latest snapshot
+        # Always update latest snapshot (every 10s)
         cursor.execute("""
                        INSERT INTO pifam_gap_tracking (award_id,
                                                        nominee_id,
@@ -278,31 +291,35 @@ class PiFamGapTracker:
                            now
                        ))
 
-        # Insert into history (creates new row each time)
-        cursor.execute("""
-                       INSERT INTO pifam_gap_history (award_id,
-                                                      nominee_id,
-                                                      actual_rank,
-                                                      gap_above,
-                                                      nominee_above_id,
-                                                      gap_below,
-                                                      nominee_below_id,
-                                                      gap_to_top,
-                                                      nominee_top_id,
-                                                      fetched_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       """, (
-                           SPECIFIC_AWARD,
-                           SPECIFIC_NOMINEE,
-                           actual_rank,
-                           gap_above,
-                           nominee_above_id,
-                           gap_below,
-                           nominee_below_id,
-                           gap_to_top,
-                           nominee_top_id,
-                           now
-                       ))
+        # Only insert into history every 10 minutes
+        save_to_history = self.should_save_history()
+
+        if save_to_history:
+            cursor.execute("""
+                           INSERT INTO pifam_gap_history (award_id,
+                                                          nominee_id,
+                                                          actual_rank,
+                                                          gap_above,
+                                                          nominee_above_id,
+                                                          gap_below,
+                                                          nominee_below_id,
+                                                          gap_to_top,
+                                                          nominee_top_id,
+                                                          fetched_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           """, (
+                               SPECIFIC_AWARD,
+                               SPECIFIC_NOMINEE,
+                               actual_rank,
+                               gap_above,
+                               nominee_above_id,
+                               gap_below,
+                               nominee_below_id,
+                               gap_to_top,
+                               nominee_top_id,
+                               now
+                           ))
+            self.last_history_save = datetime.now(TZ)
 
         self.db_conn.commit()
 
@@ -311,6 +328,8 @@ class PiFamGapTracker:
         print(f"Gap above: {gap_above}")
         print(f"Gap below: {gap_below}")
         print(f"Gap to top: {gap_to_top}")
+        if save_to_history:
+            print("✓ Saved to history")
 
     def get_gap_history(self, limit=None, start_at=None):
         """Query historical gap data"""
