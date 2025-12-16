@@ -1,5 +1,6 @@
 import json
 import threading
+from datetime import datetime
 
 import altair as alt
 import streamlit as st
@@ -184,6 +185,7 @@ def calculate_gap_trends(latest, previous):
 
     return trends
 
+
 def get_trend_markdown(st, trend):
     color = "#46aa46" if trend['color'] == "green" else "#e45f5e"
     background_color = "#143829" if trend['color'] == "green" else "#3e2428"
@@ -207,6 +209,18 @@ def get_trend_markdown(st, trend):
         """,
         unsafe_allow_html=True
     )
+
+
+def format_ts(ts: str) -> str:
+    """
+    2025-12-16T14:55:01+07:00
+    → 16/12/2025 • 14:55:01
+    """
+    try:
+        dt = datetime.fromisoformat(ts)
+        return dt.strftime("%d/%m/%Y • %H:%M:%S")
+    except Exception:
+        return ts
 
 
 # ----------------------------------
@@ -339,9 +353,10 @@ with c5:
     if trends and trends.get('gap_to_top'):
         get_trend_markdown(st, trends['gap_to_top'])
 
-st.caption(f"Cập nhật lần cuối: {latest.fetched_at}")
+st.caption(f"Cập nhật lần cuối: {format_ts(latest.fetched_at)}")
 if previous is not None:
-    st.caption(f"So sánh với: {previous.fetched_at}")
+    st.caption(f"So sánh với: {format_ts(previous.fetched_at)}")
+
 
 st.divider()
 
