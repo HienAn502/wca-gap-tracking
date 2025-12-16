@@ -1,5 +1,6 @@
 import threading
 
+import altair as alt
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -230,15 +231,30 @@ if not gap_df.empty:
         format="ISO8601",
         errors="coerce"
     )
-    chart_df = chart_df.set_index("Time")
 
-    st.line_chart(
-        chart_df[[
-            "gap_above",
-            "gap_below",
-        ]],
-        height=350
+    min_y = chart_df[["gap_above", "gap_below"]].min().min()
+    max_y = chart_df[["gap_above", "gap_below"]].max().max()
+
+    chart = (
+        alt.Chart(chart_df)
+        .transform_fold(
+            ["gap_above", "gap_below"],
+            as_=["type", "value"]
+        )
+        .mark_line()
+        .encode(
+            x="Time:T",
+            y=alt.Y(
+                "value:Q",
+                scale=alt.Scale(domain=[min_y * 0.98, max_y * 1.02]),
+                title="Gap"
+            ),
+            color="type:N"
+        )
+        .properties(height=350)
     )
+
+    st.altair_chart(chart, use_container_width=True)
 
     st.divider()
 

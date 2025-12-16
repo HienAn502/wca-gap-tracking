@@ -4,3 +4,4 @@ python-dotenv
 pywebpush
 pandas
 streamlit
+altair
