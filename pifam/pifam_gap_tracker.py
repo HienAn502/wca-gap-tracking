@@ -54,7 +54,7 @@ class PiFamGapTracker:
     def _init_db(self):
         cursor = self.db_conn.cursor()
 
-        # Latest snapshot table (still useful for quick queries)
+        # Latest snapshot table
         cursor.execute("""
                        CREATE TABLE IF NOT EXISTS pifam_gap_tracking
                        (
@@ -68,6 +68,9 @@ class PiFamGapTracker:
                            NULL,
 
                            actual_rank
+                           INTEGER,
+
+                           current_votes
                            INTEGER,
 
                            gap_above
@@ -98,6 +101,17 @@ class PiFamGapTracker:
                            )
                        """)
 
+        # Add current_votes column if it doesn't exist (for existing deployments)
+        try:
+            cursor.execute("""
+                           ALTER TABLE pifam_gap_tracking
+                               ADD COLUMN current_votes INTEGER
+                           """)
+            print("✓ Added current_votes column to pifam_gap_tracking")
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
+
         # History table - saves every 10 minutes
         cursor.execute("""
                        CREATE TABLE IF NOT EXISTS pifam_gap_history
@@ -117,6 +131,9 @@ class PiFamGapTracker:
                            NULL,
 
                            actual_rank
+                           INTEGER,
+
+                           current_votes
                            INTEGER,
 
                            gap_above
@@ -140,6 +157,17 @@ class PiFamGapTracker:
                            NULL
                        )
                        """)
+
+        # Add current_votes column to history table if it doesn't exist
+        try:
+            cursor.execute("""
+                           ALTER TABLE pifam_gap_history
+                               ADD COLUMN current_votes INTEGER
+                           """)
+            print("✓ Added current_votes column to pifam_gap_history")
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
 
         # Create indexes for better query performance
         cursor.execute("""
@@ -260,6 +288,7 @@ class PiFamGapTracker:
                        INSERT INTO pifam_gap_tracking (award_id,
                                                        nominee_id,
                                                        actual_rank,
+                                                       current_votes,
                                                        gap_above,
                                                        nominee_above_id,
                                                        gap_below,
@@ -267,10 +296,11 @@ class PiFamGapTracker:
                                                        gap_to_top,
                                                        nominee_top_id,
                                                        fetched_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(award_id, nominee_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(award_id, nominee_id)
             DO
                        UPDATE SET
                            actual_rank = excluded.actual_rank,
+                           current_votes = excluded.current_votes,
                            gap_above = excluded.gap_above,
                            nominee_above_id = excluded.nominee_above_id,
                            gap_below = excluded.gap_below,
@@ -282,6 +312,7 @@ class PiFamGapTracker:
                            SPECIFIC_AWARD,
                            SPECIFIC_NOMINEE,
                            actual_rank,
+                           current_votes,
                            gap_above,
                            nominee_above_id,
                            gap_below,
@@ -299,6 +330,7 @@ class PiFamGapTracker:
                            INSERT INTO pifam_gap_history (award_id,
                                                           nominee_id,
                                                           actual_rank,
+                                                          current_votes,
                                                           gap_above,
                                                           nominee_above_id,
                                                           gap_below,
@@ -306,11 +338,12 @@ class PiFamGapTracker:
                                                           gap_to_top,
                                                           nominee_top_id,
                                                           fetched_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                            """, (
                                SPECIFIC_AWARD,
                                SPECIFIC_NOMINEE,
                                actual_rank,
+                               current_votes,
                                gap_above,
                                nominee_above_id,
                                gap_below,
@@ -325,6 +358,7 @@ class PiFamGapTracker:
 
         print(f"[PiFam Gap] Updated at {now}")
         print(f"Rank: #{actual_rank}")
+        print(f"Current votes: {current_votes:,}")
         print(f"Gap above: {gap_above}")
         print(f"Gap below: {gap_below}")
         print(f"Gap to top: {gap_to_top}")
@@ -337,6 +371,7 @@ class PiFamGapTracker:
 
         query = """
                 SELECT actual_rank, \
+                       current_votes, \
                        gap_above, \
                        gap_below, \
                        gap_to_top,
