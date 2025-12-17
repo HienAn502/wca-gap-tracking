@@ -188,7 +188,7 @@ def calculate_gap_trends(latest, previous):
 
 def get_trend_markdown(st, trend):
     color = "#46aa46" if trend['color'] == "green" else "#e45f5e"
-    background_color = "#143829" if trend['color'] == "green" else "#3e2428"
+    background_color = "rgba(55, 186, 101, .2)" if trend['color'] == "green" else "rgba(190, 92, 95, .2)"
     arrow = trend['arrow']
     value = abs(int(trend['delta']))
 
